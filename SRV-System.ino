@@ -1,182 +1,114 @@
-#include <esp32cam.h>
-#include <WebServer.h>
+#include "esp_camera.h"
 #include <WiFi.h>
-#include "Arduino.h"
-#include "ESPAsyncWebServer.h"
+
+#define CAMERA_MODEL_AI_THINKER
+
+const char* ssid = "FAMILIA CORREIA";
+const char* password = "35750710";
+
+#if defined(CAMERA_MODEL_AI_THINKER)
+  #define PWDN_GPIO_NUM     32
+  #define RESET_GPIO_NUM    -1
+  #define XCLK_GPIO_NUM      0
+  #define SIOD_GPIO_NUM     26
+  #define SIOC_GPIO_NUM     27
+
+  #define Y9_GPIO_NUM       35
+  #define Y8_GPIO_NUM       34
+  #define Y7_GPIO_NUM       39
+  #define Y6_GPIO_NUM       36
+  #define Y5_GPIO_NUM       21
+  #define Y4_GPIO_NUM       19
+  #define Y3_GPIO_NUM       18
+  #define Y2_GPIO_NUM        5
+  #define VSYNC_GPIO_NUM    25
+  #define HREF_GPIO_NUM     23
+  #define PCLK_GPIO_NUM     22
+#else
+  #error "Camera model not selected"
+#endif
 
 // GPIO Setting
-int gpLb =  2; // Left 1
-int gpLf = 14; // Left 2
-int gpRb = 15; // Right 1
-int gpRf = 13; // Right 2
-int gpLed =  4; // Light
+extern int gpLb =  2; // Left 1
+extern int gpLf = 14; // Left 2
+extern int gpRb = 15; // Right 1
+extern int gpRf = 13; // Right 2
+extern int gpLed =  4; // Light
+extern String WiFiAddr ="";
 
-void WheelAct(int nLf, int nLb, int nRf, int nRb);
-void handleMjpeg(void);
+void startCameraServer();
 
-const char* WIFI_SSID = "FAMILIA CORREIA";
-const char* WIFI_PASS = "35750710";
+void setup() {
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
 
-const char* streamUsername = "esp32";
-const char* streamPassword = "pass32";
-const char* streamRealm = "ESP32-CAM, please log in!";
-const char* authFailResponse = "Sorry, login failed!";
-
-const char* streamPath = "/stream";
-
-static auto loRes = esp32cam::Resolution::find(320, 240);
-static auto midRes = esp32cam::Resolution::find(350, 530);
-static auto hiRes = esp32cam::Resolution::find(800, 600);
-
-const uint8_t jpgqal = 80;
-const uint8_t fps = 12;    //sets minimum delay between frames, HW limits of ESP32 allows about 12fps @ 800x600
-
-AsyncWebServer serverHTTP(80);
-WebServer serverStream(81);
-
-void setCrossOrigin(){
-    serverStream.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
-    serverStream.sendHeader(F("Access-Control-Max-Age"), F("600"));
-    serverStream.sendHeader(F("Access-Control-Allow-Methods"), F("PUT,POST,GET,OPTIONS"));
-    serverStream.sendHeader(F("Access-Control-Allow-Headers"), F("*"));
-};
-
-void setupMotors() {
   pinMode(gpLb, OUTPUT); //Left Backward
   pinMode(gpLf, OUTPUT); //Left Forward
   pinMode(gpRb, OUTPUT); //Right Forward
   pinMode(gpRf, OUTPUT); //Right Backward
   pinMode(gpLed, OUTPUT); //Light
-}
- 
 
-void setup()
-{
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-
-  setupMotors();
-
-  {
-    using namespace esp32cam;
-    Config cfg;
-    cfg.setPins(pins::AiThinker);
-    cfg.setResolution(midRes);
-    cfg.setBufferCount(2);
-    cfg.setJpeg(jpgqal);
-
-    bool ok = Camera.begin(cfg);
-    Serial.println(ok ? F("CAMERA OK") : F("CAMERA FAIL"));
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  //init with high specs to pre-allocate larger buffers
+  if(psramFound()){
+    config.frame_size = FRAMESIZE_UXGA;
+    config.jpeg_quality = 10;
+    config.fb_count = 2;
+  } else {
+    config.frame_size = FRAMESIZE_SVGA;
+    config.jpeg_quality = 12;
+    config.fb_count = 1;
   }
 
-  Serial.println(String(F("JPEG quality: ")) + jpgqal);
-  Serial.println(String(F("Framerate: ")) + fps);
-
-  Serial.print(F("Connecting to WiFi"));
-
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
- 
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(F("."));
-    delay(500);
-  }
-
-  Serial.print(F("\nCONNECTED!\nhttp://"));
-  Serial.print(WiFi.localIP());
-  Serial.print(":81");
-  Serial.println(streamPath);
-
-  serverStream.enableCORS();
-  serverStream.on(streamPath, handleMjpeg);
-
-  serverHTTP.on("/go", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WheelAct(HIGH, LOW, HIGH, LOW);
-    Serial.println("Go!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "GO");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-  serverHTTP.on("/back", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WheelAct(LOW, HIGH, LOW, HIGH);
-    Serial.println("Back!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "BACK");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-  serverHTTP.on("/left", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WheelAct(HIGH, LOW, LOW, HIGH);
-    Serial.println("Left!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "LEFT");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-  serverHTTP.on("/right", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WheelAct(LOW, HIGH, HIGH, LOW);
-    Serial.println("Right!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "RIGHT");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-  serverHTTP.on("/stop", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WheelAct(LOW, LOW, LOW, LOW);
-    Serial.println("Stop!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "STOP");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-  serverHTTP.on("/ledon", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WheelAct(LOW, LOW, LOW, LOW);
-    Serial.println("Led on!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "LED ON");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-  serverHTTP.on("/ledoff", HTTP_GET, [](AsyncWebServerRequest *request) {
-    digitalWrite(gpLed, LOW);
-    Serial.println("Led off!");
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "LEF OFF");
-    response->addHeader("Access-Control-Allow-Origin","*");
-    request->send(response);
-  });
-
-  serverStream.begin();
-  serverHTTP.begin();
-}
-
-void loop()
-{
-  serverStream.handleClient();
-}
-
-void WheelAct(int nLf, int nLb, int nRf, int nRb)
-{
-  digitalWrite(gpLf, nLf);
-  digitalWrite(gpLb, nLb);
-  digitalWrite(gpRf, nRf);
-  digitalWrite(gpRb, nRb);
-}
-
-
-void handleMjpeg()
-{
-  setCrossOrigin();
-  if (!esp32cam::Camera.changeResolution(midRes)) {
-    Serial.println(F("SET RESOLUTION FAILED"));
-  }
-
-  struct esp32cam::CameraClass::StreamMjpegConfig mjcfg;
-  mjcfg.frameTimeout = 10000;
-  mjcfg.minInterval = 1000 / fps;
-  mjcfg.maxFrames = -1;
- 
-  Serial.println(String (F("STREAM BEGIN @ ")) + fps + F("fps (minInterval ") + mjcfg.minInterval + F("ms)") );
-  WiFiClient client = serverStream.client();
-  auto startTime = millis();
-  int res = esp32cam::Camera.streamMjpeg(client, mjcfg);
-  if (res <= 0) {
-    Serial.printf("STREAM ERROR %d\n", res);
+  // camera init
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
-  auto duration = millis() - startTime;
-  Serial.printf("STREAM END %dfrm %0.2ffps\n", res, 1000.0 * res / duration);
+
+  sensor_t * s = esp_camera_sensor_get();
+  s->set_framesize(s, FRAMESIZE_CIF);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+
+  startCameraServer();
+
+  Serial.print("Camera Ready! Use 'http://");
+  Serial.print(WiFi.localIP());
+  WiFiAddr = WiFi.localIP().toString();
+  Serial.println("' to connect");
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+
 }

@@ -1,15 +1,15 @@
-//based on https://github.com/yoursunny/esp32cam
 #include <esp32cam.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include "Arduino.h"
+#include "ESPAsyncWebServer.h"
 
 // GPIO Setting
-extern int gpLb =  2; // Left 1
-extern int gpLf = 14; // Left 2
-extern int gpRb = 15; // Right 1
-extern int gpRf = 13; // Right 2
-extern int gpLed =  4; // Light
+int gpLb =  2; // Left 1
+int gpLf = 14; // Left 2
+int gpRb = 15; // Right 1
+int gpRf = 13; // Right 2
+int gpLed =  4; // Light
 
 void WheelAct(int nLf, int nLb, int nRf, int nRb);
 void handleMjpeg(void);
@@ -24,23 +24,44 @@ const char* authFailResponse = "Sorry, login failed!";
 
 const char* streamPath = "/stream";
 
+static auto loRes = esp32cam::Resolution::find(320, 240);
+static auto midRes = esp32cam::Resolution::find(350, 530);
 static auto hiRes = esp32cam::Resolution::find(800, 600);
 
 const uint8_t jpgqal = 80;
-const uint8_t fps = z;    //sets minimum delay between frames, HW limits of ESP32 allows about 12fps @ 800x600
+const uint8_t fps = 12;    //sets minimum delay between frames, HW limits of ESP32 allows about 12fps @ 800x600
 
-WebServer server(80);
+AsyncWebServer serverHTTP(80);
+WebServer serverStream(81);
+
+void setCrossOrigin(){
+    serverStream.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
+    serverStream.sendHeader(F("Access-Control-Max-Age"), F("600"));
+    serverStream.sendHeader(F("Access-Control-Allow-Methods"), F("PUT,POST,GET,OPTIONS"));
+    serverStream.sendHeader(F("Access-Control-Allow-Headers"), F("*"));
+};
+
+void setupMotors() {
+  pinMode(gpLb, OUTPUT); //Left Backward
+  pinMode(gpLf, OUTPUT); //Left Forward
+  pinMode(gpRb, OUTPUT); //Right Forward
+  pinMode(gpRf, OUTPUT); //Right Backward
+  pinMode(gpLed, OUTPUT); //Light
+}
+ 
 
 void setup()
 {
   Serial.begin(115200);
-  Serial.println();
+  Serial.setDebugOutput(true);
+
+  setupMotors();
 
   {
     using namespace esp32cam;
     Config cfg;
     cfg.setPins(pins::AiThinker);
-    cfg.setResolution(hiRes);
+    cfg.setResolution(midRes);
     cfg.setBufferCount(2);
     cfg.setJpeg(jpgqal);
 
@@ -52,9 +73,9 @@ void setup()
   Serial.println(String(F("Framerate: ")) + fps);
 
   Serial.print(F("Connecting to WiFi"));
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+ 
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(F("."));
     delay(500);
@@ -62,44 +83,69 @@ void setup()
 
   Serial.print(F("\nCONNECTED!\nhttp://"));
   Serial.print(WiFi.localIP());
+  Serial.print(":81");
   Serial.println(streamPath);
 
-  server.on(streamPath, handleMjpeg);
-  server.on("/go", HTTP_GET, []() {
+  serverStream.enableCORS();
+  serverStream.on(streamPath, handleMjpeg);
+
+  serverHTTP.on("/go", HTTP_GET, [](AsyncWebServerRequest *request) {
     WheelAct(HIGH, LOW, HIGH, LOW);
-    server.send(200, "text/html", "GO");
+    Serial.println("Go!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "GO");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
-  server.on("/back", HTTP_GET, []() {
+  serverHTTP.on("/back", HTTP_GET, [](AsyncWebServerRequest *request) {
     WheelAct(LOW, HIGH, LOW, HIGH);
-    server.send(200, "text/html", "BACK");
+    Serial.println("Back!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "BACK");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
-  server.on("/left", HTTP_GET, []() {
+  serverHTTP.on("/left", HTTP_GET, [](AsyncWebServerRequest *request) {
     WheelAct(HIGH, LOW, LOW, HIGH);
-    server.send(200, "text/html", "LEFT");
+    Serial.println("Left!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "LEFT");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
-  server.on("/right", HTTP_GET, []() {
+  serverHTTP.on("/right", HTTP_GET, [](AsyncWebServerRequest *request) {
     WheelAct(LOW, HIGH, HIGH, LOW);
-    server.send(200, "text/html", "RIGHT");
+    Serial.println("Right!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "RIGHT");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
-  server.on("/stop", HTTP_GET, []() {
+  serverHTTP.on("/stop", HTTP_GET, [](AsyncWebServerRequest *request) {
     WheelAct(LOW, LOW, LOW, LOW);
-    server.send(200, "text/html", "STOP");
+    Serial.println("Stop!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "STOP");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
-  server.on("/ledon", HTTP_GET, []() {
+  serverHTTP.on("/ledon", HTTP_GET, [](AsyncWebServerRequest *request) {
     WheelAct(LOW, LOW, LOW, LOW);
-    server.send(200, "text/html", "LED ON");
+    Serial.println("Led on!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "LED ON");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
-  server.on("/leoff", HTTP_GET, []() {
+  serverHTTP.on("/ledoff", HTTP_GET, [](AsyncWebServerRequest *request) {
     digitalWrite(gpLed, LOW);
-    server.send(200, "text/html", "LEF OFF");
+    Serial.println("Led off!");
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "LEF OFF");
+    response->addHeader("Access-Control-Allow-Origin","*");
+    request->send(response);
   });
 
-  server.begin();
+  serverStream.begin();
+  serverHTTP.begin();
 }
 
 void loop()
 {
-  server.handleClient();
+  serverStream.handleClient();
 }
 
 void WheelAct(int nLf, int nLb, int nRf, int nRb)
@@ -113,12 +159,8 @@ void WheelAct(int nLf, int nLb, int nRf, int nRb)
 
 void handleMjpeg()
 {
-  // if(!server.authenticate(streamUsername, streamPassword)) {
-  //   Serial.println(F("STREAM auth required, sending request"));
-  //   return server.requestAuthentication(BASIC_AUTH, streamRealm, authFailResponse);
-  // }   
-  
-  if (!esp32cam::Camera.changeResolution(hiRes)) {
+  setCrossOrigin();
+  if (!esp32cam::Camera.changeResolution(midRes)) {
     Serial.println(F("SET RESOLUTION FAILED"));
   }
 
@@ -126,8 +168,9 @@ void handleMjpeg()
   mjcfg.frameTimeout = 10000;
   mjcfg.minInterval = 1000 / fps;
   mjcfg.maxFrames = -1;
+ 
   Serial.println(String (F("STREAM BEGIN @ ")) + fps + F("fps (minInterval ") + mjcfg.minInterval + F("ms)") );
-  WiFiClient client = server.client();
+  WiFiClient client = serverStream.client();
   auto startTime = millis();
   int res = esp32cam::Camera.streamMjpeg(client, mjcfg);
   if (res <= 0) {

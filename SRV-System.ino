@@ -1,26 +1,40 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 
-//
-// WARNING!!! PSRAM IC required for UXGA resolution and high JPEG quality
-//            Ensure ESP32 Wrover Module or other board with PSRAM is selected
-//            Partial images will be transmitted if image exceeds buffer size
-//
+#define CAMERA_MODEL_AI_THINKER
 
-// Select camera model
-//#define CAMERA_MODEL_WROVER_KIT // Has PSRAM
-//#define CAMERA_MODEL_ESP_EYE // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_PSRAM // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_V2_PSRAM // M5Camera version B Has PSRAM
-//#define CAMERA_MODEL_M5STACK_WIDE // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_ESP32CAM // No PSRAM
-#define CAMERA_MODEL_AI_THINKER // Has PSRAM
-//#define CAMERA_MODEL_TTGO_T_JOURNAL // No PSRAM
-
-#include "camera_pins.h"
-
-const char* ssid = "FAMILIA-CORREA";
+const char* ssid = "FAMILIA CORREIA";
 const char* password = "35750710";
+
+#if defined(CAMERA_MODEL_AI_THINKER)
+  #define PWDN_GPIO_NUM     32
+  #define RESET_GPIO_NUM    -1
+  #define XCLK_GPIO_NUM      0
+  #define SIOD_GPIO_NUM     26
+  #define SIOC_GPIO_NUM     27
+
+  #define Y9_GPIO_NUM       35
+  #define Y8_GPIO_NUM       34
+  #define Y7_GPIO_NUM       39
+  #define Y6_GPIO_NUM       36
+  #define Y5_GPIO_NUM       21
+  #define Y4_GPIO_NUM       19
+  #define Y3_GPIO_NUM       18
+  #define Y2_GPIO_NUM        5
+  #define VSYNC_GPIO_NUM    25
+  #define HREF_GPIO_NUM     23
+  #define PCLK_GPIO_NUM     22
+#else
+  #error "Camera model not selected"
+#endif
+
+// GPIO Setting
+extern int gpLb =  2; // Left 1
+extern int gpLf = 14; // Left 2
+extern int gpRb = 15; // Right 1
+extern int gpRf = 13; // Right 2
+extern int gpLed =  4; // Light
+extern String WiFiAddr ="";
 
 void startCameraServer();
 
@@ -28,6 +42,12 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+
+  pinMode(gpLb, OUTPUT); //Left Backward
+  pinMode(gpLf, OUTPUT); //Left Forward
+  pinMode(gpRb, OUTPUT); //Right Forward
+  pinMode(gpRf, OUTPUT); //Right Backward
+  pinMode(gpLed, OUTPUT); //Light
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -50,9 +70,7 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  //                      for larger pre-allocated frame buffer.
+  //init with high specs to pre-allocate larger buffers
   if(psramFound()){
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 10;
@@ -63,11 +81,6 @@ void setup() {
     config.fb_count = 1;
   }
 
-#if defined(CAMERA_MODEL_ESP_EYE)
-  pinMode(13, INPUT_PULLUP);
-  pinMode(14, INPUT_PULLUP);
-#endif
-
   // camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -76,19 +89,7 @@ void setup() {
   }
 
   sensor_t * s = esp_camera_sensor_get();
-  // initial sensors are flipped vertically and colors are a bit saturated
-  if (s->id.PID == OV3660_PID) {
-    s->set_vflip(s, 1); // flip it back
-    s->set_brightness(s, 1); // up the brightness just a bit
-    s->set_saturation(s, -2); // lower the saturation
-  }
-  // initial frame rate
-  s->set_framesize(s, FRAMESIZE_SVGA);
-
-#if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
-  s->set_vflip(s, 1);
-  s->set_hmirror(s, 1);
-#endif
+  s->set_framesize(s, FRAMESIZE_CIF);
 
   WiFi.begin(ssid, password);
 
@@ -103,10 +104,11 @@ void setup() {
 
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
+  WiFiAddr = WiFi.localIP().toString();
   Serial.println("' to connect");
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  delay(10000);
+
 }

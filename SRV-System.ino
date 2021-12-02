@@ -1,5 +1,7 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include "soc/soc.h"    // Disable brownout problems
+#include "soc/rtc_cntl_reg.h"  // Disable brownout problems
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -39,6 +41,7 @@ extern String WiFiAddr ="";
 void startCameraServer();
 
 void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
